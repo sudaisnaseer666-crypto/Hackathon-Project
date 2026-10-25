@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leave requests — Sudais hired</title>
+<link rel="icon" href="../assets/alihired_logo.svg">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="guard">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="content">
+    <header class="topbar" id="topbar"></header>
+    <main class="main">
+      <div class="page-head"><div><h1>Leave requests</h1><p>Approve or reject requests and leave a comment.</p></div></div>
+      <section class="card">
+        <div class="toolbar"><div class="field"><label for="status">Status</label><select id="status"><option value="">All requests</option><option>Pending</option><option>Approved</option><option>Rejected</option></select></div></div>
+        <div id="list"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <h2 id="dlgTitle">Decide request</h2>
+  <p class="muted" id="dlgInfo" style="margin-bottom:14px"></p>
+  <form class="form" id="form" novalidate>
+    <div class="field"><label for="comment">Comment (optional)</label><textarea id="comment" name="comment" maxlength="300"></textarea></div>
+    <small class="err form-level" data-for="_form"></small>
+    <div class="dialog-actions"><button class="btn ghost" type="button" id="cancel">Cancel</button><button class="btn" type="submit" id="confirmBtn">Confirm</button></div>
+  </form>
+</dialog>
+
+<script src="../js/storage.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/employees.js"></script>
+<script src="../js/attendance.js"></script>
+<script src="../js/leave.js"></script>
+<script src="../js/helper.js"></script>
+<script>
+(function () {
+  const user = HS.Auth.initPage({ roles: ['admin'], active: 'leaves' });
+  if (!user) return;
+  const U = HS.Util, $ = id => document.getElementById(id);
+  let target = null, decision = '';
+
+  function render() {
+    const f = $('status').value;
+    const rows = HS.Leave.all().filter(l => !f || l.status === f).sort((a, b) => (b.appliedOn || '').localeCompare(a.appliedOn || '') || b.id - a.id);
+    $('list').innerHTML = !rows.length ? '<div class="empty">No leave requests ' + (f ? 'with this status.' : 'yet.') + '</div>' :
+      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Reason</th><th>Status</th><th>Comment</th><th>Action</th></tr></thead><tbody>' +
+      rows.map(l => { const e = HS.Employees.find(l.employeeId);
+        return '<tr><td>' + U.esc(e ? e.name : 'Removed') + '</td><td>' + U.esc(l.type) + '</td><td>' + U.fmtDate(l.from) + ' – ' + U.fmtDate(l.to) + '</td><td class="num">' + l.days + '</td><td>' + U.esc(l.reason) +
+          '</td><td>' + U.badge(l.status) + '</td><td>' + (U.esc(l.comment) || '<small>—</small>') + '</td><td>' +
+          (l.status === 'Pending' ? '<div class="actions"><button class="btn sm ok" data-act="Approved" data-id="' + l.id + '">Approve</button><button class="btn sm danger" data-act="Rejected" data-id="' + l.id + '">Reject</button></div>' : '<small>Decided</small>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  }
+  $('status').addEventListener('change', render);
+  $('list').addEventListener('click', e => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    target = HS.Leave.all().find(l => l.id === Number(b.dataset.id)); decision = b.dataset.act;
+    const emp = HS.Employees.find(target.employeeId), bal = HS.Leave.balance(target.employeeId, target.from.slice(0, 4));
+    $('dlgTitle').textContent = (decision === 'Approved' ? 'Approve' : 'Reject') + ' leave';
+    $('dlgInfo').textContent = (emp ? emp.name : 'Employee') + ' · ' + target.type + ' · ' + U.fmtDate(target.from) + ' – ' + U.fmtDate(target.to) + ' (' + target.days + ' working day' + (target.days === 1 ? '' : 's') + '). Balance for ' + bal.year + ': ' + bal.remaining + ' of ' + bal.quota + ' left.';
+    $('confirmBtn').className = 'btn ' + (decision === 'Approved' ? 'ok' : 'danger'); $('confirmBtn').textContent = decision === 'Approved' ? 'Approve request' : 'Reject request';
+    $('form').reset(); U.setErrors($('form'), {}); $('dlg').showModal();
+  });
+  $('cancel').addEventListener('click', () => $('dlg').close());
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    const r = HS.Leave.decide(target.id, decision, e.target.comment.value);
+    if (!U.setErrors(e.target, r.ok ? {} : { _form: r.error })) return;
+    $('dlg').close(); render(); U.toast('Leave ' + decision.toLowerCase() + '.');
+  });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Employees — Sudais hired</title>
+<link rel="icon" href="../assets/alihired_logo.svg">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="guard">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="content">
+    <header class="topbar" id="topbar"></header>
+    <main class="main">
+      <div class="page-head"><div><h1>Employees</h1><p>Adding an employee also creates their login.</p></div><button class="btn primary" id="addBtn" type="button">Add employee</button></div>
+      <section class="card">
+        <div class="toolbar">
+          <div class="field"><label for="q">Search</label><input id="q" type="search" placeholder="Name, email or department"></div>
+          <div class="field"><label for="dept">Department</label><select id="dept"><option value="">All departments</option></select></div>
+        </div>
+        <div id="list"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlgTitle">
+  <h2 id="dlgTitle">Add employee</h2>
+  <form class="form" id="form" novalidate>
+    <div class="field"><label for="fName">Name</label><input id="fName" name="name" autocomplete="off"><small class="err" data-for="name"></small></div>
+    <div class="field"><label for="fEmail">Email</label><input id="fEmail" name="email" type="email" autocomplete="off"><small class="err" data-for="email"></small></div>
+    <div class="field"><label for="fPass">Password</label><input id="fPass" name="password" type="text" autocomplete="off"><small class="err" data-for="password"></small><small class="hint" id="passHint">Employee uses this to log in.</small></div>
+    <div class="row">
+      <div class="field"><label for="fDept">Department</label><input id="fDept" name="department" list="deptList" autocomplete="off"><datalist id="deptList"></datalist><small class="err" data-for="department"></small></div>
+      <div class="field"><label for="fSalary">Monthly salary</label><input id="fSalary" name="salary" type="number" min="0" step="any" inputmode="decimal"><small class="err" data-for="salary"></small></div>
+    </div>
+    <div class="field"><label for="fRole">Role</label><select id="fRole" name="role"><option value="employee">Employee</option><option value="admin">Admin</option></select><small class="err" data-for="role"></small></div>
+    <small class="err form-level" data-for="_form"></small>
+    <div class="dialog-actions"><button class="btn ghost" type="button" id="cancel">Cancel</button><button class="btn primary" type="submit">Save employee</button></div>
+  </form>
+</dialog>
+
+<script src="../js/storage.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/employees.js"></script>
+<script src="../js/attendance.js"></script>
+<script src="../js/leave.js"></script>
+<script src="../js/helper.js"></script>
+<script>
+(function () {
+  const user = HS.Auth.initPage({ roles: ['admin'], active: 'employees' });
+  if (!user) return;
+  const U = HS.Util, E = HS.Employees, $ = id => document.getElementById(id);
+  let editId = null;
+
+  function renderFilter() {
+    const sel = $('dept'), cur = sel.value, depts = E.departments();
+    sel.innerHTML = '<option value="">All departments</option>' + depts.map(d => '<option>' + U.esc(d) + '</option>').join('');
+    sel.value = depts.indexOf(cur) !== -1 ? cur : '';
+    $('deptList').innerHTML = depts.map(d => '<option value="' + U.esc(d) + '">').join('');
+  }
+  function render() {
+    renderFilter();
+    const all = E.all(), rows = E.search(all, $('q').value, $('dept').value);
+    $('list').innerHTML = !rows.length
+      ? '<div class="empty">' + (all.length > 1 ? 'No employees match your search.' : 'No employees yet. Use "Add employee" to create the first one.') + '</div>'
+      : '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th class="num">Salary</th><th>Actions</th></tr></thead><tbody>' +
+        rows.map(u => '<tr><td>' + U.esc(u.name) + (u.id === user.id ? ' <small>(you)</small>' : '') + '</td><td>' + U.esc(u.email) + '</td><td>' + U.esc(u.department) + '</td><td>' + (u.role === 'admin' ? 'Admin' : 'Employee') +
+          '</td><td class="num">' + (u.role === 'admin' && !u.salary ? '—' : U.money(u.salary)) + '</td><td><div class="actions"><button class="btn sm" data-edit="' + u.id + '">Edit</button>' +
+          (u.id === user.id ? '' : '<button class="btn sm danger" data-del="' + u.id + '">Delete</button>') + '</div></td></tr>').join('') + '</tbody></table></div>';
+  }
+  function open(id) {
+    editId = id; const f = $('form'), u = id ? E.find(id) : null;
+    f.reset(); U.setErrors(f, {});
+    $('dlgTitle').textContent = u ? 'Edit employee' : 'Add employee';
+    $('passHint').textContent = u ? 'Leave blank to keep the current password.' : 'Employee uses this to log in.';
+    if (u) { f.name.value = u.name; f.email.value = u.email; f.department.value = u.department; f.salary.value = u.salary || ''; f.role.value = u.role; }
+    $('dlg').showModal(); f.name.focus();
+  }
+
+  $('addBtn').addEventListener('click', () => open(null));
+  $('cancel').addEventListener('click', () => $('dlg').close());
+  $('q').addEventListener('input', render); $('dept').addEventListener('change', render);
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target).entries());
+    const r = editId ? E.update(editId, d) : E.create(d);
+    if (!U.setErrors(e.target, r.errors || {})) return;
+    $('dlg').close(); render(); U.toast(editId ? 'Employee updated.' : 'Employee added. Their login is ready.');
+  });
+  $('list').addEventListener('click', e => {
+    const ed = e.target.closest('[data-edit]'), del = e.target.closest('[data-del]');
+    if (ed) open(Number(ed.dataset.edit));
+    if (del) {
+      const u = E.find(Number(del.dataset.del));
+      if (u && confirm('Delete ' + u.name + '? Their attendance and leave records will also be removed.')) {
+        const r = E.remove(u.id, user.id); r.ok ? U.toast('Employee deleted.') : U.toast(r.error, 'error'); render();
+      }
+    }
+  });
+  render();
+})();
+</script>
+</body>
+</html>

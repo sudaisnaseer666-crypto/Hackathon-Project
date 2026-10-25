@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — Sudais hired</title>
+<link rel="icon" href="../assets/alihired_logo.svg">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="guard">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="content">
+    <header class="topbar" id="topbar"></header>
+    <main class="main">
+      <div class="page-head"><div><h1>Company settings</h1><p>These rules drive attendance, leave and payslip calculations.</p></div></div>
+      <section class="card" style="max-width:640px">
+        <form class="form" id="form" novalidate>
+          <div class="field"><label for="cName">Company name</label><input id="cName" name="name"><small class="err" data-for="name"></small></div>
+          <div class="row">
+            <div class="field"><label for="start">Office start time</label><input id="start" name="startTime" type="time"><small class="err" data-for="startTime"></small></div>
+            <div class="field"><label for="grace">Grace minutes</label><input id="grace" name="graceMinutes" type="number" min="0" step="1"><small class="err" data-for="graceMinutes"></small></div>
+          </div>
+          <div class="field"><label for="quota">Yearly leave quota (working days)</label><input id="quota" name="leaveQuota" type="number" min="0" step="1"><small class="err" data-for="leaveQuota"></small></div>
+          <div class="field"><span class="label" id="wdLabel">Working days</span><div class="days" id="days" role="group" aria-labelledby="wdLabel"></div><small class="err" data-for="workingDays"></small></div>
+          <p class="hint" id="rule"></p>
+          <div><button class="btn primary" type="submit">Save settings</button></div>
+        </form>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script src="../js/storage.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/employees.js"></script>
+<script src="../js/attendance.js"></script>
+<script src="../js/leave.js"></script>
+<script src="../js/helper.js"></script>
+<script>
+(function () {
+  const user = HS.Auth.initPage({ roles: ['admin'], active: 'settings' });
+  if (!user) return;
+  const U = HS.Util, S = HS.Storage, $ = id => document.getElementById(id), f = $('form');
+
+  $('days').innerHTML = U.DAYS.map((n, i) => '<label><input type="checkbox" name="wd" value="' + i + '">' + n.slice(0, 3) + '</label>').join('');
+  function rule() {
+    const [h, m] = (f.startTime.value || '09:00').split(':').map(Number), t = h * 60 + m + (Number(f.graceMinutes.value) || 0);
+    $('rule').textContent = 'Check-ins after ' + U.fmtTime(U.pad(Math.floor(t / 60) % 24) + ':' + U.pad(t % 60)) + ' are marked Late. Work under 5 hours is a Half Day.';
+  }
+  function load() {
+    const c = S.getCompany();
+    f.name.value = c.name; f.startTime.value = c.startTime; f.graceMinutes.value = c.graceMinutes; f.leaveQuota.value = c.leaveQuota;
+    f.querySelectorAll('[name=wd]').forEach(cb => { cb.checked = c.workingDays.indexOf(Number(cb.value)) !== -1; }); rule();
+  }
+  f.addEventListener('input', rule);
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    const errors = {}, grace = f.graceMinutes.value, quota = f.leaveQuota.value;
+    const wd = Array.from(f.querySelectorAll('[name=wd]:checked')).map(cb => Number(cb.value));
+    if (!f.name.value.trim()) errors.name = 'Company name is required.';
+    if (!f.startTime.value) errors.startTime = 'Office start time is required.';
+    if (grace === '' || !(Number(grace) >= 0) || !Number.isInteger(Number(grace))) errors.graceMinutes = 'Enter whole minutes (0 or more).';
+    if (quota === '' || !(Number(quota) >= 0) || !Number.isInteger(Number(quota))) errors.leaveQuota = 'Enter a whole number (0 or more).';
+    if (!wd.length) errors.workingDays = 'Select at least one working day.';
+    if (!U.setErrors(f, errors)) return;
+    const c = S.getCompany();
+    S.saveCompany(Object.assign(c, { name: f.name.value.trim(), startTime: f.startTime.value, graceMinutes: Number(grace), leaveQuota: Number(quota), workingDays: wd }));
+    U.toast('Settings saved.');
+  });
+  load();
+})();
+</script>
+</body>
+</html>

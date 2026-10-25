@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payslip —Sudais hired</title>
+<link rel="icon" href="../assets/alihired_logo.svg">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="guard">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="content">
+    <header class="topbar" id="topbar"></header>
+    <main class="main">
+      <div class="page-head no-print"><div><h1>Monthly payslip</h1><p>Salary, attendance and deductions for the selected month.</p></div><button class="btn primary" id="printBtn" type="button">Print / Save as PDF</button></div>
+      <section class="card no-print" style="margin-bottom:18px">
+        <div class="toolbar" style="margin-bottom:0">
+          <div class="field" id="empField"><label for="emp">Employee</label><select id="emp"></select></div>
+          <div class="field"><label for="month">Month</label><input id="month" type="month"></div>
+        </div>
+      </section>
+      <div id="slip"></div>
+    </main>
+  </div>
+</div>
+
+<script src="../js/storage.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/employees.js"></script>
+<script src="../js/attendance.js"></script>
+<script src="../js/leave.js"></script>
+<script src="../js/helper.js"></script>
+<script>
+(function () {
+  const user = HS.Auth.initPage({ roles: ['admin', 'employee'], active: 'payslip' });
+  if (!user) return;
+  const U = HS.Util, $ = id => document.getElementById(id), isAdmin = user.role === 'admin';
+  $('month').value = U.today().slice(0, 7);
+
+  if (isAdmin) {
+    const staff = HS.Employees.staff();
+    $('emp').innerHTML = staff.map(e => '<option value="' + e.id + '">' + U.esc(e.name) + ' — ' + U.esc(e.department) + '</option>').join('');
+  } else $('empField').hidden = true;      // employees only ever see their own payslip
+
+  function render() {
+    const emp = isAdmin ? HS.Employees.find(Number($('emp').value)) : HS.Employees.find(user.id), ym = $('month').value;
+    $('printBtn').disabled = !emp || !ym;
+    if (!emp) { $('slip').innerHTML = '<div class="card empty">No employees yet. Add an employee to generate payslips.</div>'; return; }
+    if (!ym) { $('slip').innerHTML = '<div class="card empty">Choose a month.</div>'; return; }
+    const s = HS.Attendance.monthSummary(emp, ym), c = HS.Storage.getCompany();
+    // Assignment formulas
+    const perDay = s.workingDays ? emp.salary / s.workingDays : 0;
+    const deduction = perDay * (s.absent + 0.5 * s.half);
+    const net = emp.salary - deduction;
+    const [y, m] = ym.split('-').map(Number), label = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const row = (k, v, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + k + '</td><td class="num">' + v + '</td></tr>';
+    $('slip').innerHTML = '<section class="card slip"><div class="slip-head"><div><h2>' + U.esc(c.name) + '</h2><small>Payslip · ' + label + '</small></div><div style="text-align:right"><strong>' + U.esc(emp.name) + '</strong><br><small>' + U.esc(emp.email) + '<br>' + U.esc(emp.department) + '</small></div></div>' +
+      '<div class="table-wrap"><table><tbody>' +
+      row('Monthly salary', U.money(emp.salary)) + row('Working days in month', s.workingDays) +
+      row('Present days (incl. late)', s.present + s.late) + row('Late arrivals (counted as present)', s.late) + row('On approved leave', s.onLeave) +
+      row('Half days', s.half) + row('Absent days', s.absent) +
+      row('Per-day salary', U.money(perDay)) + row('Deduction = per-day × (absent + 0.5 × half days)', '− ' + U.money(deduction)) +
+      row('Net salary', U.money(net), 'net') + '</tbody></table></div>' +
+      '<p class="hint" style="margin-top:12px">Days that have not finished yet (today and later) are not counted as absent.</p></section>';
+  }
+  $('emp').addEventListener('change', render); $('month').addEventListener('input', render);
+  $('printBtn').addEventListener('click', () => window.print());
+  render();
+})();
+</script>
+</body>
+</html>

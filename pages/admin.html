@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin dashboard — Sudais hired</title>
+<link rel="icon" href="../assets/alihired_logo.svg">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="guard">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="content">
+    <header class="topbar" id="topbar"></header>
+    <main class="main">
+      <div class="page-head"><div><h1>Admin dashboard</h1><p id="dateLine"></p></div></div>
+
+      <section class="grid stats" id="stats" aria-label="Company totals"></section>
+
+      <div class="grid two">
+        <section class="card">
+          <div class="card-head"><h2>Today's attendance</h2></div>
+          <div id="todayTable"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>Pending leave requests</h2><a class="btn ghost sm" href="leaves.html">Manage leave</a></div>
+          <div id="pendingList"></div>
+        </section>
+      </div>
+
+      <div class="grid two">
+        <section class="card">
+          <div class="card-head"><h2>Smart Helper</h2></div>
+          <div id="helper"></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>Announcements</h2></div>
+          <form class="form" id="noteForm" novalidate>
+            <div class="field"><label for="noteText">Post an announcement</label><textarea id="noteText" name="text" maxlength="400" placeholder="Write something for all employees"></textarea><small class="err" data-for="text"></small></div>
+            <div><button class="btn primary" type="submit">Post announcement</button></div>
+          </form>
+          <ul class="notes" id="notes" style="margin-top:16px"></ul>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../js/storage.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/employees.js"></script>
+<script src="../js/attendance.js"></script>
+<script src="../js/leave.js"></script>
+<script src="../js/helper.js"></script>
+<script>
+(function () {
+  const user = HS.Auth.initPage({ roles: ['admin'], active: 'admin' });
+  if (!user) return;
+  const U = HS.Util, $ = id => document.getElementById(id);
+
+  function render() {
+    const today = U.today(), staff = HS.Employees.staff(), isWorking = HS.Attendance.isWorkingISO(today);
+    const recs = staff.map(e => HS.Attendance.get(e.id, today)).filter(Boolean);
+    const late = recs.filter(r => r.late).length;
+    const onLeave = staff.filter(e => HS.Leave.isOnLeave(e.id, today)).length;
+    const pending = HS.Leave.all().filter(l => l.status === 'Pending');
+    const notIn = isWorking ? staff.filter(e => !HS.Attendance.get(e.id, today) && !HS.Leave.isOnLeave(e.id, today)).length : 0;
+    const depts = new Set(staff.map(e => e.department)).size;
+    $('dateLine').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + (isWorking ? '' : ' · Not a working day');
+
+    const card = (label, n, sub, accent) => '<div class="stat' + (accent ? ' accent' : '') + '"><span>' + label + '</span><strong>' + n + '</strong><small>' + sub + '</small></div>';
+    $('stats').innerHTML =
+      card('Total employees', staff.length, depts + ' department' + (depts === 1 ? '' : 's'), true) +
+      card('Present today', recs.length, (recs.length - late) + ' on time') +
+      card('Late today', late, 'after start + grace') +
+      card('On leave today', onLeave, 'approved leave') +
+      card('Not checked in', notIn, isWorking ? 'working day' : 'non-working day') +
+      card('Pending leave', pending.length, 'awaiting decision');
+
+    $('todayTable').innerHTML = !staff.length ? '<div class="empty">No employees yet. <a href="employees.html">Add your first employee</a>.</div>' :
+      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody>' +
+      staff.map(e => { const r = HS.Attendance.get(e.id, today), st = HS.Attendance.statusFor(e, today);
+        return '<tr><td>' + U.esc(e.name) + '<br><small>' + U.esc(e.department) + '</small></td><td>' + U.fmtTime(r && r.checkIn) + '</td><td>' + U.fmtTime(r && r.checkOut) + '</td><td>' + U.badge(st) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+
+    $('pendingList').innerHTML = !pending.length ? '<div class="empty">No pending requests.</div>' :
+      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Dates</th><th class="num">Days</th></tr></thead><tbody>' +
+      pending.map(l => { const e = HS.Employees.find(l.employeeId);
+        return '<tr><td>' + U.esc(e ? e.name : 'Removed') + '<br><small>' + U.esc(l.type) + '</small></td><td>' + U.fmtDate(l.from) + ' – ' + U.fmtDate(l.to) + '</td><td class="num">' + l.days + '</td></tr>'; }).join('') + '</tbody></table></div>';
+
+    const notes = (HS.Storage.getCompany().announcements || []).slice().reverse();
+    $('notes').innerHTML = notes.length ? notes.slice(0, 6).map(n => '<li>' + U.esc(n.text) + '<small>' + U.fmtDate(n.date) + ' · ' + U.esc(n.by) + '</small></li>').join('') : '<li>No announcements yet.</li>';
+  }
+
+  $('noteForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const text = e.target.text.value.trim();
+    if (!U.setErrors(e.target, text ? {} : { text: 'Write an announcement first.' })) return;
+    const c = HS.Storage.getCompany(); c.announcements = c.announcements || [];
+    c.announcements.push({ id: U.uid(), text, date: U.today(), by: user.name });
+    HS.Storage.saveCompany(c); e.target.reset(); render(); U.toast('Announcement posted.');
+  });
+
+  HS.Helper.mount('helper', user);
+  render();
+})();
+</script>
+</body>
+</html>

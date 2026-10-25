@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My dashboard — Sudais hired</title>
+<link rel="icon" href="../assets/alihired_logo.svg">
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body class="guard">
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="content">
+    <header class="topbar" id="topbar"></header>
+    <main class="main">
+      <div class="page-head"><div><h1 id="hello">My dashboard</h1><p id="dateLine"></p></div></div>
+
+      <section class="grid stats" id="stats" aria-label="My summary"></section>
+
+      <section class="card">
+        <div class="card-head"><h2>Today</h2><span id="todayBadge"></span></div>
+        <p id="todayInfo" class="muted" style="margin-bottom:14px"></p>
+        <div class="actions"><button class="btn primary" id="inBtn" type="button">Check in</button><button class="btn" id="outBtn" type="button">Check out</button></div>
+        <small class="err form-level" id="attErr" style="margin-top:12px;display:none"></small>
+      </section>
+
+      <div class="grid two">
+        <section class="card">
+          <div class="card-head"><h2>Apply for leave</h2></div>
+          <form class="form" id="leaveForm" novalidate>
+            <div class="field"><label for="type">Leave type</label><select id="type" name="type"></select><small class="err" data-for="type"></small></div>
+            <div class="row">
+              <div class="field"><label for="from">From</label><input id="from" name="from" type="date"><small class="err" data-for="from"></small></div>
+              <div class="field"><label for="to">To</label><input id="to" name="to" type="date"><small class="err" data-for="to"></small></div>
+            </div>
+            <p class="hint" id="dayCount">Pick dates to see the working days counted.</p>
+            <div class="field"><label for="reason">Reason</label><textarea id="reason" name="reason" maxlength="300"></textarea><small class="err" data-for="reason"></small></div>
+            <div><button class="btn primary" type="submit">Submit request</button></div>
+          </form>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>My leave requests</h2></div>
+          <div id="leaveList"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head"><h2>My attendance</h2><small>Last 30 days</small></div>
+        <div id="attList"></div>
+      </section>
+
+      <div class="grid two">
+        <section class="card"><div class="card-head"><h2>Smart Helper</h2></div><div id="helper"></div></section>
+        <div>
+          <section class="card"><div class="card-head"><h2>Announcements</h2></div><ul class="notes" id="notes"></ul></section>
+          <section class="card"><div class="card-head"><h2>My information</h2></div><dl class="kv" id="info"></dl></section>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../js/storage.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/employees.js"></script>
+<script src="../js/attendance.js"></script>
+<script src="../js/leave.js"></script>
+<script src="../js/helper.js"></script>
+<script>
+(function () {
+  const user = HS.Auth.initPage({ roles: ['employee'], active: 'employee' });
+  if (!user) return;
+  const U = HS.Util, A = HS.Attendance, $ = id => document.getElementById(id);
+  const ym = U.today().slice(0, 7);
+
+  function render() {
+    const me = HS.Employees.find(user.id) || user, today = U.today(), rec = A.get(me.id, today);
+    const bal = HS.Leave.balance(me.id), sum = A.monthSummary(me, ym), c = HS.Storage.getCompany();
+    $('hello').textContent = 'Hello, ' + me.name.split(' ')[0];
+    $('dateLine').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const card = (l, n, s, a) => '<div class="stat' + (a ? ' accent' : '') + '"><span>' + l + '</span><strong>' + n + '</strong><small>' + s + '</small></div>';
+    $('stats').innerHTML = card('Leave balance', bal.remaining, 'of ' + bal.quota + ' days in ' + bal.year, true) +
+      card('Hours this week', A.hoursThisWeek(me.id).toFixed(1), 'completed days') +
+      card('Present this month', sum.present + sum.late + sum.half, sum.late + ' late · ' + sum.half + ' half day') +
+      card('Absent this month', sum.absent, 'working days missed');
+
+    const working = A.isWorkingISO(today), st = A.statusFor(me, today);
+    $('todayBadge').innerHTML = U.badge(st);
+    $('todayInfo').textContent = !working && !rec ? 'Today is not a working day.' : !rec ? 'You have not checked in yet. Office starts at ' + U.fmtTime(c.startTime) + ' with ' + c.graceMinutes + ' grace minutes.' :
+      'Checked in at ' + U.fmtTime(rec.checkIn) + (rec.checkOut ? ' and out at ' + U.fmtTime(rec.checkOut) + ' (' + A.hours(rec).toFixed(1) + ' hours).' : '. Remember to check out.');
+    $('inBtn').disabled = !!rec || !working; $('outBtn').disabled = !rec || !!(rec && rec.checkOut);
+
+    const rows = A.recentDays(me, 30);
+    $('attList').innerHTML = !rows.length ? '<div class="empty">No attendance yet.</div>' :
+      '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Check in</th><th>Check out</th><th class="num">Hours</th><th>Status</th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td>' + U.fmtDate(r.date) + '</td><td>' + U.fmtTime(r.rec && r.rec.checkIn) + '</td><td>' + U.fmtTime(r.rec && r.rec.checkOut) + '</td><td class="num">' + (r.rec && r.rec.checkOut ? A.hours(r.rec).toFixed(1) : '—') + '</td><td>' + U.badge(r.status) + '</td></tr>').join('') + '</tbody></table></div>';
+
+    const leaves = HS.Leave.forEmployee(me.id).slice().sort((a, b) => b.id - a.id);
+    $('leaveList').innerHTML = !leaves.length ? '<div class="empty">You have not requested leave yet.</div>' :
+      '<div class="table-wrap"><table><thead><tr><th>Dates</th><th class="num">Days</th><th>Status</th><th>Admin comment</th></tr></thead><tbody>' +
+      leaves.map(l => '<tr><td>' + U.fmtDate(l.from) + ' – ' + U.fmtDate(l.to) + '<br><small>' + U.esc(l.type) + '</small></td><td class="num">' + l.days + '</td><td>' + U.badge(l.status) + '</td><td>' + (U.esc(l.comment) || '<small>—</small>') + '</td></tr>').join('') + '</tbody></table></div>';
+
+    const notes = (c.announcements || []).slice().reverse().slice(0, 5);
+    $('notes').innerHTML = notes.length ? notes.map(n => '<li>' + U.esc(n.text) + '<small>' + U.fmtDate(n.date) + ' · ' + U.esc(n.by) + '</small></li>').join('') : '<li>No announcements yet.</li>';
+    $('info').innerHTML = '<dt>Name</dt><dd>' + U.esc(me.name) + '</dd><dt>Email</dt><dd>' + U.esc(me.email) + '</dd><dt>Department</dt><dd>' + U.esc(me.department) + '</dd><dt>Role</dt><dd>Employee</dd><dt>Salary</dt><dd>' + U.money(me.salary) + ' / month</dd><dt>Joined</dt><dd>' + U.fmtDate(me.joined) + '</dd>';
+  }
+
+  function attend(fn) {
+    const r = fn(user.id), box = $('attErr');
+    box.style.display = r.ok ? 'none' : 'block'; box.textContent = r.ok ? '' : r.error;
+    if (r.ok) U.toast('Done — ' + (r.record.checkOut ? 'checked out.' : 'checked in.'));
+    render();
+  }
+  $('inBtn').addEventListener('click', () => attend(id => A.checkIn(id)));
+  $('outBtn').addEventListener('click', () => attend(id => A.checkOut(id)));
+
+  $('type').innerHTML = '<option value="">Select type</option>' + HS.Leave.TYPES.map(t => '<option>' + t + '</option>').join('');
+  const f = $('leaveForm');
+  function count() {
+    const n = HS.Leave.workingDates(f.from.value, f.to.value).length;
+    $('dayCount').textContent = f.from.value && f.to.value ? (n + ' working day' + (n === 1 ? '' : 's') + ' will be counted (weekends and non-working days skipped).') : 'Pick dates to see the working days counted.';
+  }
+  f.from.addEventListener('input', count); f.to.addEventListener('input', count);
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    const r = HS.Leave.apply(user.id, Object.fromEntries(new FormData(f).entries()));
+    if (!U.setErrors(f, r.errors || {})) return;
+    f.reset(); count(); render(); U.toast('Leave request sent for approval.');
+  });
+
+  HS.Helper.mount('helper', user);
+  render();
+})();
+</script>
+</body>
+</html>
